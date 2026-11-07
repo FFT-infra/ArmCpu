@@ -621,6 +621,7 @@ static int64_t psciCall (bool hvc, uint64_t function, uint64_t a, uint64_t b, ui
 void ArmCpu::startThread (void *argument, wait_result_t)
 {
   ArmCpu *self = static_cast<ArmCpu *> (argument);
+  thread_set_thread_name (current_thread (), "armcpu_start");
   armcpu_smp_step[self->logicalId] = 3;
   // Blocks until the new core reaches the scheduler; a core that never arrives only stalls this helper thread.
   processor_start (self->machProcessor);
@@ -819,7 +820,7 @@ extern "C" void armcpu_core_note_deaf (uint32_t core)
 // causes: interrupts pending but never taken (the core is masked or halted), enables cleared (its GIC was
 // turned off), or nothing pending at all (no sender targets it). Read-only; the frame is found by affinity.
 // out: 0 GICR_TYPER affinity word, 1 GICR_ISPENDR0, 2 GICR_ISENABLER0, 3 GICR_ISACTIVER0, 4 GICR_WAKER.
-extern "C" int armcpu_core_gicr_probe (uint32_t core, uint32_t out[5])
+extern "C" int armcpu_core_gicr_probe (uint32_t core, uint32_t out[7])
 {
   if (core >= 8 || gFrames == 0 || out == nullptr) { return -1; }
   uint32_t affinity = armcpu_smp_mpidr[core];
@@ -835,6 +836,11 @@ extern "C" int armcpu_core_gicr_probe (uint32_t core, uint32_t out[5])
       out[2] = *reinterpret_cast<volatile uint32_t *> (sgi + 0x100);
       out[3] = *reinterpret_cast<volatile uint32_t *> (sgi + 0x300);
       out[4] = *reinterpret_cast<volatile uint32_t *> (frames + offset + 0x14);
+      /* The two registers that decide whether an enabled, pending interrupt is ever signalled:
+       * its group (Group 0 is never signalled while ICC_IGRPEN0 is off) and its priority against
+       * PMR. Both are per-redistributor, so a healthy core can read them cross-core. */
+      out[5] = *reinterpret_cast<volatile uint32_t *> (sgi + 0x80);
+      out[6] = *reinterpret_cast<volatile uint32_t *> (sgi + 0x400);
       return 0;
     }
     if ((typer & 16) != 0) { break; }
@@ -932,6 +938,20 @@ extern "C" void armcpu_sgi_selfprobe (uint64_t *out)
     out[9] = tb - ta;
   }
   __asm__ volatile ("msr daif, %0; isb" :: "r" (daif) : "memory");
+}
+
+extern "C" void armcpu_ipi_selftest (uint64_t aff);
+
+/* Sends the same diagnostic IPI to a core by logical number: the target's handler runs the kernel's
+ * IPI callback, and the IRQ entry records the PC it interrupted, which is the point of sending it. */
+extern "C" int armcpu_ipi_probe_core (uint32_t core)
+{
+  if (core >= 8) { return -1; }
+  uint32_t affinity = armcpu_smp_mpidr[core];
+  if (affinity == 0) { affinity = armcpu_smp_seen_mpidr[core]; }
+  if (affinity == 0) { return -2; }
+  armcpu_ipi_selftest (static_cast<uint64_t> (affinity));
+  return 0;
 }
 
 extern "C" void armcpu_ipi_selftest (uint64_t aff)
