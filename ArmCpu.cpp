@@ -66,6 +66,11 @@ volatile uint32_t armcpu_smp_step[8], armcpu_smp_mpidr[8], armcpu_smp_seen_mpidr
 // System registers seen on each secondary core at initCPU entry: CurrentEL, SCTLR_EL1, TCR_EL1, MAIR_EL1 (low words), MIDR_EL1.
 volatile uint32_t armcpu_smp_sys[8][5], armcpu_boot_sys[5];
 volatile int32_t armcpu_smp_psci_rc[8];
+// CNTKCTL_EL1 as each core read it in initCPU. Bit 2 is EVNTEN, the generic timer's event stream:
+// XNU's hw_lock waits for it in wfe when a lock is contended (hw_unlock stores the new word and
+// sends no event), so a core that reaches that wfe without EVNTEN never returns. Reading the
+// register per core separates "the event stream was configured" from "the wfe is simply waiting".
+volatile uint64_t armcpu_core_cntkctl[8];
 }
 
 #define ARMCPU_SMP_SLOTS 8
@@ -647,6 +652,11 @@ void ArmCpu::startSecondary (void)
 
 void ArmCpu::initCPU (bool boot)
 {
+  {
+    uint64_t cntkctl = 0;
+    __asm__ volatile ("mrs %0, cntkctl_el1" : "=r" (cntkctl));
+    armcpu_core_cntkctl[logicalId] = cntkctl;
+  }
   if (secondary) {
     if (!boot) { panic ("ArmCpu: secondary resume is unsupported"); }
     armcpu_smp_step[logicalId] = 5;
