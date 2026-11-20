@@ -59,7 +59,7 @@ volatile uint32_t armcpu_core_irq_enter[8];
 volatile uint64_t armcpu_irq_long_drains = 0;
 volatile uint32_t armcpu_irq_drain_most = 0;
 volatile uint32_t armcpu_quiesce_calls = 0,armcpu_halt_calls = 0;
-// Secondary-CPU bring-up evidence (sheng-smp=1). Step values: 1 nub started, 2 registered, 3 start thread running,
+// Secondary-CPU bring-up evidence (smp=1). Step values: 1 nub started, 2 registered, 3 start thread running,
 // 4 PSCI CPU_ON issued, 5 entered initCPU on the new core, 6 GIC redistributor ready, 7 running.
 volatile uint32_t armcpu_smp_requested = 0, armcpu_smp_running = 0, armcpu_smp_conduit = 0;
 volatile uint32_t armcpu_smp_step[8], armcpu_smp_mpidr[8], armcpu_smp_seen_mpidr[8], armcpu_smp_fail[8], armcpu_boot_mpidr = 0;
@@ -236,7 +236,7 @@ static bool gSmpWanted = false;
 // the boot nub, or a late secondary once the boot CPU is registered, finishes them.
 static class ArmCpu *volatile gPending[ARMCPU_SMP_SLOTS];
 static volatile uint32_t gBootRegistered = 0;
-static bool gRemoteGic = false; // sheng-smp-gic=1: the boot CPU prepares a new core's redistributor before CPU_ON
+static bool gRemoteGic = false; // smp-gic=1: the boot CPU prepares a new core's redistributor before CPU_ON
 
 // This fork's clusterType() looked a core up by logical number and indexed topology->cpus[]; upstream searches the array for
 // the matching phys_id instead. Both agree for the boot cluster and the second is the one upstream ships, so the merge kept
@@ -244,7 +244,7 @@ static bool gRemoteGic = false; // sheng-smp-gic=1: the boot CPU prepares a new 
 
 // Once every core of the topology is registered, ml_cpu_init_completed: the Edge scheduler then sets the edges between clusters
 // (without it no thread migrates or is stolen across clusters). AppleARMSMP calls it after starting all cores; here they come up
-// through ArmCpu. With sheng-smp=0 only the boot core registers and nothing is called, as before.
+// through ArmCpu. With smp=0 only the boot core registers and nothing is called, as before.
 static volatile uint32_t gRegisteredCores = 0;
 volatile uint32_t armcpu_init_completed = 0;
 static void noteRegistered (void)
@@ -294,9 +294,9 @@ IOService *ArmCpu::probe (IOService *provider, SInt32 *score)
   memcpy (&id, reg->getBytesNoCopy (), sizeof (id));
   if (ml_get_cpu_number (id) != ml_get_boot_cpu_number ()) {
     unsigned smp = 0;
-    PE_parse_boot_argn ("sheng-smp", &smp, sizeof (smp));
+    PE_parse_boot_argn ("smp", &smp, sizeof (smp));
     if (smp == 0 || ml_get_cpu_number (id) < 0 || ml_get_cpu_number (id) >= ARMCPU_SMP_SLOTS) {
-      return nullptr; // Secondary startup is opt-in (sheng-smp=1).
+      return nullptr; // Secondary startup is opt-in (smp=1).
     }
   }
   return IOCPU::probe (provider, score);
@@ -530,10 +530,10 @@ bool ArmCpu::start (IOService *provider)
   // that follows, because this fork counts registered cores and calls ml_cpu_init_completed from it.
   setCPUNumber (info.log_id);
   unsigned smp = 0;
-  PE_parse_boot_argn ("sheng-smp", &smp, sizeof (smp));
+  PE_parse_boot_argn ("smp", &smp, sizeof (smp));
   gSmpWanted = smp != 0;
   unsigned remote = 0;
-  PE_parse_boot_argn ("sheng-smp-gic", &remote, sizeof (remote));
+  PE_parse_boot_argn ("smp-gic", &remote, sizeof (remote));
   gRemoteGic = remote != 0;
   armcpu_smp_requested = gSmpWanted ? 1 : 0;
   unsigned cpuCount = static_cast<unsigned> (ml_get_max_cpu_number ()) + 1;
